@@ -180,7 +180,7 @@ async function run() {
       res.send(result);
     });
 
-    //  Delete
+    // ! Delete
     app.delete("/carts/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -189,6 +189,7 @@ async function run() {
     });
 
     // * create payment intent
+    
     app.post("/create-payment-intent", verifyJWT, async (req, res) => {
       const { price } = req.body;
       const amount = parseInt(price * 100);
@@ -213,7 +214,71 @@ async function run() {
       };
       const deleteResult = await cartCollection.deleteMany(query);
 
-      res.send({insertResult, deleteResult});
+      res.send({ insertResult, deleteResult });
+    });
+
+    app.get("/admin-stats", verifyJWT, verifyAdmin, async (req, res) => {
+      const users = await usersCollection.estimatedDocumentCount();
+      const products = await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+      const payments = await paymentCollection.find().toArray();
+      const revenue = payments.reduce((sum, payment) => sum + payment.price, 0);
+
+      //best way to get sum
+
+      res.send({
+        users,
+        products,
+        orders,
+        revenue,
+      });
+    });
+
+    /*
+     *---------------
+     * Bangla System
+     * ---------------
+     *  1. load all payments
+     *  2. for each payment ,get the menuItems array
+     *  3. for each item in the menuItems array get the menuItem from the menu collection
+     *  4. put them in an array: allOrderedItems
+     *  5. separate allOrdersItems by category using filter
+     *  6. now get the quantity by using length: pizza.length
+     *  7. for each category use reduce to get the total amount spent on the category
+     */
+
+    app.get("/order-stats", verifyJWT, verifyAdmin, async (req, res) => {
+      const pipeline = [
+        {
+          $lookup: {
+            from: "menu",
+            localField: "menuItems",
+            foreignField: "_id",
+            as: "menuItemsData",
+          },
+        },
+        {
+          $unwind: "$menuItemsData",
+        },
+        {
+          $group: {
+            _id: "$menuItemsData.category",
+            count: { $sum: 1 },
+            total: { $sum: "$menuItemsData.price" },
+          },
+        },
+        {
+          $project: {
+            category: "$_id",
+            count: 1,
+            total: { $round: ["$total", 2] },
+            _id: 0,
+          },
+        },
+      ];
+
+      const result = await paymentCollection.aggregate(pipeline).toArray();
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
